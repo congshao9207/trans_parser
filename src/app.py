@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import traceback
 
 from flask import Flask, request, send_from_directory
@@ -34,6 +35,7 @@ from util.file_util import create_temp_file
 from util.pagination import paginate
 from util.pagination_serializer import PaginationSerializer
 
+
 app = Flask(__name__)
 logger = LoggerUtil().logger(__name__)
 pps = PreParseScheduler()
@@ -48,8 +50,22 @@ def _init_system():
     # 注册蓝图
     app.register_blueprint(ver_app.ver_app, url_prefix='/ver')
     # 初始化eureka
-    eureka_client.init(eureka_server=EUREKA_SERVER, app_name="TRANS-PARSER", instance_port=8011)
-    logger.info("eureka client started. center: %s", EUREKA_SERVER)
+    # eureka_client.init(eureka_server=EUREKA_SERVER, app_name="TRANS-PARSER", instance_port=8011)
+    try:
+        host_ip = socket.gethostbyname(socket.gethostname())
+    except Exception as e:
+        host_ip = '127.0.0.1'
+    instance_id = f"TRANS-PARSER-{host_ip}-8011-{os.getpid()}"
+
+    eureka_client.init(
+        eureka_server=EUREKA_SERVER,
+        app_name="TRANS-PARSER",
+        instance_port=8011,
+        instance_id=instance_id,
+        renewal_interval_in_secs=15,
+        duration_in_secs=45
+    )
+    logger.info("✅ Registered as %s (PID=%s)", instance_id, os.getpid())
 
     # 初始化工作线程
     for i in range(MAX_WORKERS):

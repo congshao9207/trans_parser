@@ -6,6 +6,7 @@ from get_filename import get_filename
 from config.res_code import ResCodeEnum
 from config.trans_config import WORK_SPACE
 from detection.checkBOC import checkBC
+from detection.checkBOR import checkBOR
 from detection.checkBank import checkBank
 from detection.checkCIB import checkCIB
 from detection.checkNullValue import checkNullValue
@@ -20,7 +21,8 @@ DETECTION_FUNS = {
         "BOC": checkBC,
         "CIB": checkCIB,
         "PHB": checkPHB,
-        "NULLVALUE": checkNullValue
+        "NULLVALUE": checkNullValue,
+        "BOR": checkBOR,
     }
 
 

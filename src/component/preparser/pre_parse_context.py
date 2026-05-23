@@ -61,7 +61,7 @@ class PreParseContext(object):
             "user_name": self.user_name,
             "start_date": self.start_date,
             "end_date": self.end_date,
-            "row_count": self.row_count
+            "row_count": re.sub("笔", '', str(self.row_count)),
         }
 
     def _format_data(self):

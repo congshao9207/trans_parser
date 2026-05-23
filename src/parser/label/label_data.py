@@ -91,12 +91,35 @@ class LabelData(object):
         return result
 
     def _drop_duplicate_data(self, data=None):
-        sql = """select * from trans_report_flow where out_req_no in
-            (select out_req_no from trans_account where account_name='%s' and id_card_no='%s' and
-            account_no='%s' and bank='%s' and task_no = '%s' order by id desc)""" % \
-              (self.param.get('cusName'), self.param.get('idNo'), self.param.get('bankAccount'),
-               self.param.get('bankName'), self.param.get('taskNo'))
-        df = sql_to_df(sql)
+        # sql = """select * from trans_report_flow where out_req_no in
+        #     (select out_req_no from trans_account where account_name='%s' and id_card_no='%s' and
+        #     account_no='%s' and bank='%s' and task_no = '%s' order by id desc)""" % \
+        #       (self.param.get('cusName'), self.param.get('idNo'), self.param.get('bankAccount'),
+        #        self.param.get('bankName'), self.param.get('taskNo'))
+        # df = sql_to_df(sql)
+        params = {
+            'cusName': self.param.get('cusName'),
+            'idNo': self.param.get('idNo'),
+            'bankAccount': self.param.get('bankAccount'),
+            'bankName': self.param.get('bankName'),
+            'taskNo': self.param.get('taskNo')
+        }
+
+        # 优化后的 SQL（仅查询 out_req_no，去掉无意义的 ORDER BY）
+        sql = """
+            SELECT trf.*
+            FROM trans_report_flow trf
+            INNER JOIN trans_account ta 
+                ON trf.out_req_no = ta.out_req_no
+            WHERE ta.account_name = %(cusName)s
+              AND ta.id_card_no = %(idNo)s
+              AND ta.account_no = %(bankAccount)s
+              AND ta.bank = %(bankName)s
+              AND ta.task_no = %(taskNo)s
+        """
+
+        # 执行查询（假设 sql_to_df 支持 params 参数）
+        df = sql_to_df(sql, params=params)
         if df.shape[0] == 0:
             return
         df['trans_time'] = pd.to_datetime(df['trans_time'])
@@ -138,12 +161,33 @@ class LabelData(object):
         data.drop(index_list, axis=0, inplace=True)
 
     def _update_trans_report(self, update_df):
-        sql = """select * from trans_report_flow where out_req_no in
-            (select out_req_no from trans_account where account_name='%s' and id_card_no='%s' and
-            account_no='%s' and bank='%s' and task_no = '%s' order by id desc)""" % \
-              (self.param.get('cusName'), self.param.get('idNo'), self.param.get('bankAccount'),
-               self.param.get('bankName'), self.param.get('taskNo'))
-        rep_df = sql_to_df(sql)
+        params = {
+            'cusName': self.param.get('cusName'),
+            'idNo': self.param.get('idNo'),
+            'bankAccount': self.param.get('bankAccount'),
+            'bankName': self.param.get('bankName'),
+            'taskNo': self.param.get('taskNo')
+        }
+        sql = """
+            SELECT trf.*
+            FROM trans_report_flow trf
+            INNER JOIN trans_account ta 
+                ON trf.out_req_no = ta.out_req_no
+            WHERE ta.account_name = %(cusName)s
+              AND ta.id_card_no = %(idNo)s
+              AND ta.account_no = %(bankAccount)s
+              AND ta.bank = %(bankName)s
+              AND ta.task_no = %(taskNo)s
+        """
+
+        # 执行查询（假设 sql_to_df 支持 params 参数）
+        rep_df = sql_to_df(sql, params=params)
+        # sql = """select * from trans_report_flow where out_req_no in
+        #     (select out_req_no from trans_account where account_name='%s' and id_card_no='%s' and
+        #     account_no='%s' and bank='%s' and task_no = '%s' order by id desc)""" % \
+        #       (self.param.get('cusName'), self.param.get('idNo'), self.param.get('bankAccount'),
+        #        self.param.get('bankName'), self.param.get('taskNo'))
+        # rep_df = sql_to_df(sql)
         if rep_df.shape[0] == 0:
             return
         update_df['trans_date'] = update_df['trans_time'].apply(lambda x: x.date())
@@ -360,6 +404,16 @@ class LabelData(object):
         house_sale_list = house_sale_df.index.tolist()
         df.loc[house_sale_list, 'house_sale_var'] = 1
 
+        # 其他画像之单天大额进账
+        df['trans_date'] = pd.to_datetime(df['trans_time'].dt.date)
+        # 按日期和账号分组，统计大额交易次数
+        large_mask = df['trans_amt'] >= 100000
+        df['large_count'] = df[large_mask].groupby(['trans_date', 'opponent_account_bank', 'opponent_account_no'])['trans_amt'].transform('count')
+        # 设置标签
+        df['large_amount_1d'] = 0
+        df.loc[(df['large_count'] >= 3) & large_mask, 'large_amount_1d'] = 1
+        df.drop('large_count', axis=1, inplace=True)
+
     # 清洗标签子类
     def _sub_label_cleaning(self, label_df, column_name='mutual_exclusion_label', df=None):
         # 若未传需要清洗的标签子类，则直接返回
@@ -369,6 +423,7 @@ class LabelData(object):
             label_name = getattr(row, 'label_explanation')
             label_code = getattr(row, 'label_code')
             label_cont = re.sub('借款人姓名', str(self.param.get('cusName')), getattr(row, 'filter_content'))
+            label_cont = re.sub('空字符串', '', label_cont)
             df['temp_col'] = 0
             try:
                 exec(f"df.loc[{label_cont}, 'temp_col'] = 1")
@@ -457,6 +512,8 @@ class LabelData(object):
             df['compatibility_label'] = df['compatibility_label'].apply(
                 lambda x: ','.join(re.sub(compat_label_str, ' ', x).split()))
 
+
+
     def _save_data(self, df):
         df.rename(columns={'id': 'flow_id'}, inplace=True)
         alter_sql = f"""select max(id) as max_id from label_logic_alter"""
@@ -521,8 +578,9 @@ class LabelData(object):
         df['opponent_type'] = df['opponent_name'].apply(self._opponent_type)
         df['trans_flow_src_type'] = 1 if str(parse_task.trans_flow_src_type) in ['2', '3'] else 0
         # 判断是首次清洗标签还是重新清洗标签
-        reclean_sql = f"""select * from trans_label where out_req_no = '{self.out_req_no}'"""
-        clean_df = sql_to_df(reclean_sql)
+        flow_id_list = df['flow_id'].unique().tolist()
+        reclean_sql = f"""select * from trans_label where flow_id in %(flow_id_list)s"""
+        clean_df = sql_to_df(reclean_sql, params={"flow_id_list": flow_id_list})
         if clean_df.shape[0] > 0:
             df = pd.merge(df, clean_df, how='left', on='flow_id')
             alter_id = clean_df['alter_id'].max()
